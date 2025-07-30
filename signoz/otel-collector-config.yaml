@@ -1,18 +1,24 @@
-receivers:
   filelog/postgres:
-    include: ["/var/lib/postgresql/data/log/postgresql.log"]  # Adjust based on actual container volume
+    include:
+      - /var/lib/docker/containers/*/*.log
+    include_file_path: true
+    include_file_name: true
     start_at: beginning
     operators:
-      - type: regex_parser
-        regex: '^(?P<timestamp>[^ ]+) \[(?P<pid>\d+)\] (?P<user>\w+)@(?P<db>\w+): (?P<log_level>\w+): (?P<message>.*)'
+      - type: json_parser
+        id: parse-json
         timestamp:
-          parse_from: attributes.timestamp
-          layout: '%Y-%m-%d %H:%M:%S.%L %Z'
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+        severity:
+          parse_from: attributes.level
+        message:
+          parse_from: attributes.log
       - type: move
-        from: attributes.message
+        from: attributes.log
         to: body
-      - type: remove
-        field: attributes.timestamp
+      - type: filter
+        expr: 'body contains "postgres"'
 
   sqlquery:
     driver: "postgres"
@@ -64,13 +70,18 @@ service:
     metrics:
       address: 0.0.0.0:8888
 
+
   pipelines:
+     pipelines:
+    logs:
+      receivers: [otlp, tcplog/docker, filelog/postgres]
+      processors: [batch]
+      exporters: [clickhouselogsexporter]
+
+
     metrics:
       receivers: [otlp, postgresql, sqlquery]
       processors: [batch]
       exporters: [clickhousemetricswrite]
 
-    logs:
-      receivers: [filelog/postgres]
-      processors: [batch]
-      exporters: [clickhouselogsexporter]
+  
